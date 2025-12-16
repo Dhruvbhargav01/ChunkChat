@@ -1,123 +1,108 @@
-// import { langfuse } from './langfuse';
-// import { getPineconeIndex } from './pinecone';
-// import { generateGeminiAnswer } from './gemini';
-
-// type RagAssistantArgs = {
-//   message: string;
-// };
-
-// export async function ragAssistant({ message }: RagAssistantArgs): Promise<string> {
-//   const lower = message.toLowerCase();
-
-//   let toolType: 'none' | 'list_files' | 'search_docs' = 'none';
-
-//   if (lower.includes('list files') || lower.includes('show files') || lower.includes('available documents') || lower.includes('files')) {
-//     toolType = 'list_files';
-//   } else if (lower.includes('pdf') || lower.includes('document') || lower.includes('resume') || lower.includes('file') || lower.includes('based on my docs')) {
-//     toolType = 'search_docs';
-//   }
-
-//   const trace = langfuse.trace({
-//     name: 'rag-chatbot',
-//     input: { user_message: message, toolType },
-//   });
-
-//   let toolContext = '';
-
-//   try {
-//     if (toolType === 'list_files') {
-//       const res = await fetch('http://localhost:3000/api/files');
-//       const data = await res.json();
-//       if (data.files && data.files.length > 0) {
-//         toolContext = 'Available files:\n' + data.files.map((f: string) => `- ${f}`).join('\n');
-//       } else {
-//         toolContext = 'No files uploaded yet.';
-//       }
-//     }
-
-//     if (toolType === 'search_docs') {
-//       try {
-//         const index = await getPineconeIndex();
-//         const embedding = new Array(1024).fill(0); // placeholder for vector search
-//         const result = await index.query({
-//           vector: embedding,
-//           topK: 5,
-//           includeMetadata: true,
-//         });
-
-//         const matches = (result.matches || []) as any[];
-
-//         if (matches.length === 0) {
-//           toolContext = 'No relevant content found in the stored document chunks for this question.';
-//         } else {
-//           toolContext = matches
-//             .map((m: any) => {
-//               const text = m.metadata?.text ?? '';
-//               const filename = m.metadata?.filename ?? 'unknown file';
-//               const score = m.score ?? 0;
-//               return `From file "${filename}" (score ${(score * 100).toFixed(1)}%):\n${text.slice(0, 300)}...`;
-//             })
-//             .join('\n\n');
-//         }
-//       } catch (err: any) {
-//         console.error('Pinecone search failed:', err);
-//         toolContext = 'Document search is currently unavailable.';
-//       }
-//     }
-
-//     const systemPrompt = `
-// You are ChunkChat Assistant.
-
-// RULES:
-// - TOOL TYPE: ${toolType}
-// - TOOL CONTEXT: ${toolContext || 'No tool used or no context returned.'}
-// - USER MESSAGE: ${message}
-
-// Respond as the assistant following the rules above.
-// `;
-
-//     const reply = await generateGeminiAnswer(systemPrompt);
-
-//     trace.update?.({
-//       output: { reply, toolType, toolContextLength: toolContext.length },
-//     });
-
-//     return reply;
-//   } catch (err: any) {
-//     console.error('ragAssistant error:', err);
-
-//     trace.update?.({
-//       output: { error: err.message || String(err) },
-//       // level: 'ERROR',
-//     });
-
-//     return 'Sorry, something went wrong while generating the response.';
-//   }
-// }
-
 // lib/llm.ts
-import { generateGeminiAnswer } from './gemini';
+import { callOpenAIWithTools, getEmbedding } from './openai'
+import { searchPinecone } from './pinecone'
+import { langfuse } from './langfuse'
 
-type RagAssistantArgs = {
-  message: string;
-};
+type RagAssistantArgs = { message: string }
 
 export async function ragAssistant({ message }: RagAssistantArgs): Promise<string> {
-  try {
-    if (!message || !message.trim()) return 'Please enter a message.';
+  if (!message.trim()) return 'Please enter a message.'
 
-    const systemPrompt = `
-You are ChunkChat Assistant.
+  const trace = langfuse.trace({
+    name: 'rag-assistant',
+    input: { message },
+  })
 
-USER MESSAGE: ${message}
+  const systemPrompt =
+    'You are ChunkChat Assistant. You can have normal conversation. ' +
+    'When the user asks about uploaded PDF/DOCX documents, you may use the tool ' +
+    '"search_documents" to look up relevant chunks in Pinecone. ' +
+    'When you use document information, mention the source file name in square brackets, like [myfile.pdf].'
 
-Respond naturally and clearly.
-`;
+  // 1) First call: let OpenAI decide whether to call the tool
+  const initial = await callOpenAIWithTools({
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: message },
+    ],
+    tools: [
+      {
+        type: 'function',
+        function: {
+          name: 'search_documents',
+          description:
+            'Search Pinecone for relevant chunks to answer questions about uploaded PDF/DOCX documents.',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string' },
+            },
+            required: ['query'],
+          },
+        },
+      },
+    ],
+    tool_choice: 'auto',
+  })
 
-    const reply = await generateGeminiAnswer(systemPrompt);
-    return reply;
-  } catch (err: any) {
-    console.error('ragAssistant error:', err);
-    return 'Sorry, something went wrong while generating the response.';
+  const choice = initial.choices?.[0]
+  const msg = choice?.message
+  const toolCall = msg?.tool_calls?.[0]
+
+  // 2) If OpenAI calls search_documents, run Pinecone search
+  if (toolCall && toolCall.type === 'function' && toolCall.function?.name === 'search_documents') {
+    let toolArgs: { query: string } = { query: message }
+
+    try {
+      const parsed = JSON.parse(toolCall.function.arguments || '{}')
+      if (parsed && typeof parsed.query === 'string') {
+        toolArgs = { query: parsed.query }
+      }
+    } catch {
+      toolArgs = { query: message }
+    }
+
+    const span = trace.span({
+      name: 'search_documents',
+      input: toolArgs,
+    })
+
+    const embedding = await getEmbedding(toolArgs.query)
+    const matches = await searchPinecone(embedding)
+
+    span.update?.({ output: { matchesCount: matches.length } })
+
+    const toolResultText = matches
+      .map((m: any) => `File: ${m.filename}\nChunk: ${m.text}`)
+      .join('\n\n')
+
+    // ✅ IMPORTANT: get tool_call_id from the first response
+    const toolCallId = toolCall.id
+
+    // 3) Second call: give tool result back to OpenAI WITH tool_call_id
+    const final = await callOpenAIWithTools({
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: message },
+        msg, // assistant message that contains tool_calls
+        {
+          role: 'tool',
+          tool_call_id: toolCallId, // ✅ required
+          name: 'search_documents',
+          content: toolResultText,
+        } as any,
+      ],
+    })
+
+    const finalMsg = final.choices?.[0]?.message
+    const reply =
+      finalMsg?.content ?? 'No answer generated from retrieved documents.'
+    trace.update?.({ output: { reply } })
+    return reply
   }
+
+  // 4) No tool call: normal conversation
+  const normalReply = msg?.content ?? 'No answer generated.'
+  trace.update?.({ output: { reply: normalReply } })
+  return normalReply
 }

@@ -22,6 +22,7 @@
     "langfuse": "^3.38.6",
     "mammoth": "^1.11.0",
     "next": "16.0.10",
+    "openai": "^6.14.0",
     "pdftojson": "^0.0.3",
     "react": "19.2.1",
     "react-dom": "19.2.1",

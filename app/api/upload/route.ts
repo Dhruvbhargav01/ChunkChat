@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase';
 import { chunkText } from '@/lib/chunkText';
 import crypto from 'crypto';
 import { getPineconeIndex } from '@/lib/pinecone';
-import { getEmbedding, generateGeminiAnswer } from '@/lib/gemini';
+import { getEmbedding } from '@/lib/openai';
 import { extractText } from 'unpdf';
 import * as mammoth from 'mammoth';
 
