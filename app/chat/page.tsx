@@ -28,8 +28,8 @@ export default function ChatPage() {
             const res = await fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ messages: newMessages }),
-            })
+                body: JSON.stringify({ message: input }),
+            });
 
             const data = await res.json()
             if (res.ok && data.reply) {
@@ -106,7 +106,7 @@ export default function ChatPage() {
                     )}
                 </div>
                 <div className="rounded-2xl bg-gradient-to-br from-[#050816] via-black to-[#050816] border border-white/10 shadow-[0_0_30px_rgba(15,23,42,0.9)] p-4">
-                    <div className="flex gap-2 items-end"> 
+                    <div className="flex gap-2 items-end">
                         <textarea
                             className="flex-1 bg-transparent border border-white/15 focus:border-[#8b5cf6] focus:ring-1 focus:ring-[#8b5cf6] rounded-xl px-4 py-2 text-sm resize-none h-10 text-slate-100 placeholder:text-slate-500 outline-none"
                             placeholder="Type your message here..."
