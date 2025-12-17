@@ -7,7 +7,7 @@
 
 ## Project Overview
 
-**ChunkChat** is a Retrieval-Augmented Generation (RAG) application that allows users to upload documents (PDF/DOCX), store them in Supabase, convert them into semantic chunks, and query them through an intelligent chatbot powered by **Gemini**. The chatbot supports both normal conversation and document-based question answering using vector search.
+**ChunkChat** is a Retrieval-Augmented Generation (RAG) application that allows users to upload documents (PDF/DOCX), store them in Supabase, convert them into semantic chunks, and query them through an intelligent chatbot powered by **OpenAI**. The chatbot supports both normal conversation and document-based question answering using vector search.
 
 ---
 
@@ -44,7 +44,7 @@
 * **Framework**: Next.js (App Router), TypeScript
 * **Storage**: Supabase (Storage Bucket)
 * **Vector DB**: Pinecone
-* **LLM**: Google Gemini
+* **LLM**: Open AI
 * **Observability**: Langfuse
 * **Deployment**: Vercel
 
@@ -77,7 +77,7 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 PINECONE_API_KEY=your_pinecone_api_key
 PINECONE_INDEX_NAME=your_index_name
 
-GEMINI_API_KEY=your_gemini_api_key
+OPEN_API_KEY=your_open_api_key
 
 LANGFUSE_PUBLIC_KEY=your_langfuse_public_key
 LANGFUSE_SECRET_KEY=your_langfuse_secret_key
